@@ -298,9 +298,9 @@ cairo_list_move_tail (cairo_list_t *entry, cairo_list_t *head)
  * Move @old list to @new list, fixing up the references.
  **/
 static inline void
-cairo_list_move_list (cairo_list_t *old, cairo_list_t *new)
+cairo_list_move_list (cairo_list_t *old, cairo_list_t *newl)
 {
-    __cairo_list_add (new, old->prev, old->next);
+    __cairo_list_add (newl, old->prev, old->next);
     cairo_list_init (old);
 }
 

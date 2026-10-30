@@ -182,6 +182,11 @@ cairo_feature_sources = {
   'cairo-dwrite-font': [
     'win32/cairo-dwrite-font.cpp',
   ],
+  'cairo-d2d-surface': [
+    'win32/d2d/cairo-d2d-surface.cpp',
+    'win32/d2d/cairo-d3d10-backend.cpp',
+    'win32/d2d/cairo-d3d11-backend.cpp',
+  ],
   'cairo-script': [
     'cairo-script-surface.c',
   ],

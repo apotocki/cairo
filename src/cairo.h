@@ -369,8 +369,10 @@ typedef enum _cairo_status {
     CAIRO_STATUS_TAG_ERROR,
     CAIRO_STATUS_DWRITE_ERROR,
     CAIRO_STATUS_SVG_FONT_ERROR,
+	CAIRO_STATUS_NO_DEVICE,
 
-    CAIRO_STATUS_LAST_STATUS
+    CAIRO_STATUS_LAST_STATUS,
+	CAIRO_STATUS_UNSUPPORTED = 100
 } cairo_status_t;
 
 /**
@@ -2585,7 +2587,8 @@ typedef enum _cairo_surface_type {
     CAIRO_SURFACE_TYPE_XML,
     CAIRO_SURFACE_TYPE_SKIA,
     CAIRO_SURFACE_TYPE_SUBSURFACE,
-    CAIRO_SURFACE_TYPE_COGL
+    CAIRO_SURFACE_TYPE_COGL,
+	CAIRO_SURFACE_TYPE_D2D
 } cairo_surface_type_t;
 
 cairo_public cairo_surface_type_t
@@ -2703,6 +2706,25 @@ cairo_surface_show_page (cairo_surface_t *surface);
 
 cairo_public cairo_bool_t
 cairo_surface_has_show_text_glyphs (cairo_surface_t *surface);
+
+/**
+ * _cairo_subpixel_antialiasing_t:
+ * @CAIRO_SUBPIXEL_ANTIALIASING_ENABLED: subpixel antialiasing is enabled
+ * for this surface.
+ * @CAIRO_SUBPIXEL_ANTIALIASING_DISABLED: subpixel antialiasing is disabled
+ * for this surface.
+ */
+typedef enum _cairo_subpixel_antialiasing_t {
+	CAIRO_SUBPIXEL_ANTIALIASING_ENABLED,
+	CAIRO_SUBPIXEL_ANTIALIASING_DISABLED
+} cairo_subpixel_antialiasing_t;
+
+cairo_public void
+cairo_surface_set_subpixel_antialiasing(cairo_surface_t* surface,
+	cairo_subpixel_antialiasing_t enabled);
+
+cairo_public cairo_subpixel_antialiasing_t
+cairo_surface_get_subpixel_antialiasing(cairo_surface_t* surface);
 
 /* Image-surface functions */
 

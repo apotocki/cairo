@@ -307,6 +307,9 @@ _cairo_unbounded_rectangle_init (cairo_rectangle_int_t *rect)
     *rect = _cairo_unbounded_rectangle;
 }
 
+cairo_private void
+_rectangle_intersect_clip(cairo_rectangle_int_t* extents, const cairo_clip_t* clip);
+
 cairo_private_no_warn cairo_bool_t
 _cairo_rectangle_intersect (cairo_rectangle_int_t *dst,
 			    const cairo_rectangle_int_t *src);
@@ -428,6 +431,9 @@ _cairo_ft_font_reset_static_data (void);
 
 cairo_private void
 _cairo_win32_font_reset_static_data (void);
+
+cairo_private void
+_cairo_dwrite_font_reset_static_data(void);
 
 #if CAIRO_HAS_WIN32_SURFACE
 cairo_private void
@@ -1479,6 +1485,15 @@ _cairo_surface_show_text_glyphs (cairo_surface_t	    *surface,
 				 cairo_text_cluster_flags_t  cluster_flags,
 				 cairo_scaled_font_t	    *scaled_font,
 				 const cairo_clip_t		    *clip);
+
+cairo_private cairo_status_t
+_cairo_surface_mask_extents (cairo_surface_t *surface,
+			     cairo_operator_t		 op,
+			     const cairo_pattern_t	*source,
+			     const cairo_pattern_t	*mask,
+			     const cairo_clip_t		*clip,
+			     cairo_rectangle_int_t	*extents);
+
 
 cairo_private cairo_status_t
 _cairo_surface_tag (cairo_surface_t	        *surface,

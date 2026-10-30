@@ -74,6 +74,7 @@ cairo_debug_reset_static_data (void)
 
 #if CAIRO_HAS_WIN32_FONT
     _cairo_win32_font_reset_static_data ();
+	_cairo_dwrite_font_reset_static_data();
 #endif
 
 #if CAIRO_HAS_WIN32_SURFACE

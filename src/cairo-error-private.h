@@ -100,7 +100,7 @@ enum _cairo_int_status {
     CAIRO_INT_STATUS_TAG_ERROR,
     CAIRO_INT_STATUS_DWRITE_ERROR,
     CAIRO_INT_STATUS_SVG_FONT_ERROR,
-
+    CAIRO_INT_STATUS_NO_DEVICE,
     CAIRO_INT_STATUS_LAST_STATUS,
 
     CAIRO_INT_STATUS_UNSUPPORTED = 100,
@@ -108,16 +108,16 @@ enum _cairo_int_status {
     CAIRO_INT_STATUS_NOTHING_TO_DO,
     CAIRO_INT_STATUS_FLATTEN_TRANSPARENCY,
     CAIRO_INT_STATUS_IMAGE_FALLBACK,
-    CAIRO_INT_STATUS_ANALYZE_RECORDING_SURFACE_PATTERN,
+    CAIRO_INT_STATUS_ANALYZE_RECORDING_SURFACE_PATTERN
 };
 
 typedef enum _cairo_int_status cairo_int_status_t;
 
 #define _cairo_status_is_error(status) \
-    ((status) != CAIRO_STATUS_SUCCESS && (status) < CAIRO_STATUS_LAST_STATUS)
+    ((status) != CAIRO_STATUS_SUCCESS && ((status) < CAIRO_STATUS_LAST_STATUS || (status) == CAIRO_STATUS_UNSUPPORTED))
 
 #define _cairo_int_status_is_error(status) \
-    ((status) != CAIRO_INT_STATUS_SUCCESS && (status) < CAIRO_INT_STATUS_LAST_STATUS)
+    ((status) != CAIRO_INT_STATUS_SUCCESS && ((status) < CAIRO_INT_STATUS_LAST_STATUS || (status) == CAIRO_INT_STATUS_UNSUPPORTED))
 
 cairo_private cairo_status_t
 _cairo_error (cairo_status_t status);

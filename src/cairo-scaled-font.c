@@ -409,6 +409,35 @@ _cairo_scaled_font_map_unlock (void)
    CAIRO_MUTEX_UNLOCK (_cairo_scaled_font_map_mutex);
 }
 
+#if !defined(NDEBUG) && defined(_WIN32)
+#include <windows.h>
+#include <stdio.h>
+
+static void
+_cairo_debug_print_leaked_scaled_font_cb (void *entry, void *closure)
+{
+    cairo_scaled_font_t *scaled_font = entry;
+    char buf[256];
+    int refcount = CAIRO_REFERENCE_COUNT_GET_VALUE (&scaled_font->ref_count);
+    int face_type = scaled_font->font_face ? scaled_font->font_face->backend->type : -1;
+    int face_refcount = scaled_font->font_face ? CAIRO_REFERENCE_COUNT_GET_VALUE (&scaled_font->font_face->ref_count) : -1;
+
+    (void) closure;
+    snprintf (buf, sizeof (buf),
+	"leaked scaled_font %p refcount=%d font_face=%p face_type=%d face_refcount=%d size=%g\n",
+	(void*) scaled_font, refcount,
+	(void*) scaled_font->font_face, face_type, face_refcount,
+	scaled_font->font_matrix.yy);
+    OutputDebugStringA (buf);
+}
+
+void
+_cairo_debug_print_leaked_scaled_fonts (cairo_hash_table_t *hash_table)
+{
+    _cairo_hash_table_foreach (hash_table, _cairo_debug_print_leaked_scaled_font_cb, NULL);
+}
+#endif
+
 void
 _cairo_scaled_font_map_destroy (void)
 {
@@ -448,6 +477,9 @@ _cairo_scaled_font_map_destroy (void)
 	free (scaled_font);
     }
 
+#if !defined(NDEBUG) && defined(_WIN32)
+    _cairo_debug_print_leaked_scaled_fonts (font_map->hash_table);
+#endif
     _cairo_hash_table_destroy (font_map->hash_table);
 
     free (cairo_scaled_font_map);

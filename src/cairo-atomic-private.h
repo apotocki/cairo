@@ -476,7 +476,7 @@ _cairo_atomic_ptr_cmpxchg_return_old_fallback(cairo_atomic_intptr_t *x, void *ol
 
 #define _cairo_status_set_error(status, err) do { \
     int ret__; \
-    assert (err < CAIRO_STATUS_LAST_STATUS); \
+    assert (err < CAIRO_STATUS_LAST_STATUS || err == CAIRO_STATUS_UNSUPPORTED); \
     assert (sizeof(*status) == sizeof(cairo_atomic_int_t)); \
     /* hide compiler warnings about cairo_status_t != int (gcc treats its as \
      * an unsigned integer instead, and about ignoring the return value. */  \

@@ -107,6 +107,295 @@ cairo_win32_scaled_font_get_device_to_logical (cairo_scaled_font_t *scaled_font,
 
 #endif /* CAIRO_HAS_WIN32_FONT */
 
+#if CAIRO_HAS_D2D_SURFACE
+
+/**
+ * Create a D2D device
+ *
+ * \return New D2D device, NULL if creation failed.
+ */
+cairo_public cairo_device_t *
+cairo_d2d_create_device();
+
+cairo_public cairo_device_t *
+cairo_d2d_create_device_from_d3d10device(struct ID3D10Device1 *device);
+
+/**
+ * Create a D2D device on top of a newly created D3D11 device (immediate
+ * context). Behaves like cairo_d2d_create_device() but the resulting
+ * cairo device is D3D11-backed. Surfaces inherit the kind of their
+ * device; mixing surfaces of devices of different kinds in one operation
+ * is unsupported.
+ *
+ * \return New D2D device, NULL if creation failed.
+ */
+cairo_public cairo_device_t *
+cairo_d2d_create_device11(void);
+
+/**
+ * Create a D2D device on top of an existing D3D11 device. The device must
+ * have been created with D3D11_CREATE_DEVICE_BGRA_SUPPORT.
+ *
+ * \return New D2D device, NULL if creation failed.
+ */
+cairo_public cairo_device_t *
+cairo_d2d_create_device_from_d3d11device(struct ID3D11Device *device);
+
+/**
+ * Releases a D2D device.
+ *
+ */
+cairo_public void
+cairo_release_device(cairo_device_t *device);
+
+/**
+ * Addrefs a D2D device.
+ *
+ */
+cairo_public void
+cairo_addref_device(cairo_device_t *device);
+
+/**
+ * Flushes a D3D device. In most cases the surface backend will do this
+ * internally, but when using a surfaces created from a shared handle this
+ * should be executed manually when a different device is going to be accessing
+ * the same surface data. This will also block until the device is finished
+ * processing all work.
+ */
+cairo_public void
+cairo_d2d_finish_device(cairo_device_t *device);
+
+/**
+ * Gets the D3D10 device used by a certain cairo_device_t.
+ * Returns NULL if the device is not D3D10-backed.
+ */
+cairo_public struct ID3D10Device1*
+cairo_d2d_device_get_device(cairo_device_t *device);
+
+/**
+ * Gets the D3D11 device used by a certain cairo_device_t.
+ * Returns NULL if the device is not D3D11-backed.
+ */
+cairo_public struct ID3D11Device*
+cairo_d2d_device_get_device11(cairo_device_t *device);
+
+/**
+ * Create a D2D surface for an HWND
+ *
+ * \param device Device used to create the surface
+ * \param wnd Handle for the window
+ * \param content Content of the window, should be COLOR_ALPHA for transparent windows
+ * \return New cairo surface
+ */
+cairo_public cairo_surface_t *
+cairo_d2d_surface_create_for_hwnd(cairo_device_t *device, HWND wnd, cairo_content_t content);
+
+/**
+ * Create a D2D surface of a certain size.
+ *
+ * \param device Device used to create the surface
+ * \param format Cairo format of the surface
+ * \param width Width of the surface
+ * \param height Height of the surface
+ * \return New cairo surface
+ */
+cairo_public cairo_surface_t *
+cairo_d2d_surface_create(cairo_device_t *device,
+			 cairo_format_t format,
+                         int width,
+                         int height);
+
+/**
+ * Create a D3D surface from a Texture SharedHandle, this is obtained from a
+ * CreateTexture call on a D3D9 device. This has to be an A8R8G8B8 format
+ * or an A8 format, the treatment of the alpha channel can be indicated using
+ * the content parameter.
+ *
+ * \param device Device used to create the surface
+ * \param handle Shared handle to the texture we want to wrap
+ * \param content Content of the texture, COLOR_ALPHA for ARGB
+ * \return New cairo surface
+ */
+cairo_public cairo_surface_t *
+cairo_d2d_surface_create_for_handle(cairo_device_t *device, HANDLE handle, cairo_content_t content);
+
+/**
+ * Create a D3D surface from an ID3D10Texture2D texture, this is obtained from a
+ * CreateTexture2D call on a D3D10 device. This has to be an A8R8G8B8 format
+ * or an A8 format, the treatment of the alpha channel can be indicated using
+ * the content parameter.
+ *
+ * \param device Device used to create the surface
+ * \param texture Texture that we want to wrap
+ * \param content Content of the texture
+ * \return New cairo surface
+ */
+cairo_public cairo_surface_t *
+cairo_d2d_surface_create_for_texture(cairo_device_t *device,
+				     struct ID3D10Texture2D *texture,
+				     cairo_content_t content);
+
+/**
+ * Create a D3D surface from an ID3D11Texture2D texture, this is obtained
+ * from a CreateTexture2D call on a D3D11 device (e.g. a swap chain back
+ * buffer). This has to be an A8R8G8B8 format or an A8 format, the
+ * treatment of the alpha channel can be indicated using the content
+ * parameter. The device must be D3D11-backed (cairo_d2d_create_device11 /
+ * cairo_d2d_create_device_from_d3d11device); otherwise an error surface
+ * is returned.
+ *
+ * \param device Device used to create the surface
+ * \param texture Texture that we want to wrap
+ * \param content Content of the texture
+ * \return New cairo surface
+ */
+cairo_public cairo_surface_t *
+cairo_d2d_surface_create_for_texture11(cairo_device_t *device,
+				       struct ID3D11Texture2D *texture,
+				       cairo_content_t content);
+
+/**
+ * Get the ID3D10Texture2D used for a surface.
+ * Returns NULL if the surface's device is not D3D10-backed.
+ */
+cairo_public struct ID3D10Texture2D *
+cairo_d2d_surface_get_texture(cairo_surface_t *surf);
+
+/**
+ * Resize a D2D surface.
+ *
+ * \param surface D2D surface.
+ * \param width New width.
+ * \param height New height.
+ * \return TRUE if the contents of the surface were preserved, FALSE otherwise.
+ */
+cairo_public BOOL
+cairo_d2d_surface_resize(cairo_surface_t* surface, int width, int height);
+
+/**
+ * Present the backbuffer for a surface create for an HWND. This needs
+ * to be called when the owner of the original window surface wants to
+ * actually present the executed drawing operations to the screen.
+ *
+ * \param surface D2D surface.
+ */
+cairo_public void
+cairo_d2d_present_backbuffer(cairo_surface_t *surface);
+
+/**
+ * Scroll the surface, this only moves the surface graphics, it does not
+ * actually scroll child windows or anything like that. Nor does it invalidate
+ * that area of the window.
+ *
+ * \param surface The d2d surface this operation should apply to.
+ * \param x The x delta for the movement
+ * \param y The y delta for the movement
+ * \param clip The clip rectangle, the is the 'part' of the surface that needs
+ * scrolling.
+ */
+cairo_public void
+cairo_d2d_scroll(cairo_surface_t *surface, int x, int y, cairo_rectangle_t *clip);
+
+/**
+ * Get a DC for the current render target. When selecting the retention option this
+ * call can be relatively slow, since it may require reading back contents from the
+ * hardware surface.
+ *
+ * \note This must be matched by a call to ReleaseDC!
+ *
+ * \param retain_contents If true the current contents of the RT is copied to the DC,
+ * otherwise the DC is initialized to transparent black.
+ */
+cairo_public HDC
+cairo_d2d_get_dc(cairo_surface_t *surface, cairo_bool_t retain_contents);
+
+/**
+ * Release the DC acquired through GetDC(). Optionally an update region may be specified
+ *
+ * \param updated_rect The area of the DC that was updated, if null the entire dc will
+ * be updated.
+ */
+cairo_public void
+cairo_d2d_release_dc(cairo_surface_t *surcace, const cairo_rectangle_int_t *updated_rect);
+
+/**
+ * Get an estimate of the amount of (video) RAM which is currently in use by the D2D
+ * internal image surface cache.
+ */
+cairo_public int
+cairo_d2d_get_image_surface_cache_usage();
+
+/**
+ * Get an estimate of the amount of VRAM which is currently used by the d2d
+ * surfaces for a device. This does -not- include the internal image surface
+ * cache.
+ */
+cairo_public int
+cairo_d2d_get_surface_vram_usage(cairo_device_t *device);
+
+/**
+ * Get the width of the surface.
+ */
+cairo_public int
+cairo_d2d_surface_get_width(cairo_surface_t *surface);
+
+/**
+ * Get the height of the surface.
+ */
+cairo_public int
+cairo_d2d_surface_get_height(cairo_surface_t *surface);
+
+/**
+ * Draws a Gaussian drop shadow derived from source's alpha channel into dst.
+ *
+ * The shadow is computed by the Direct2D CLSID_D2D1Shadow effect: source's
+ * alpha silhouette is blurred with standard deviation sigma (in device
+ * pixels), tinted with the given straight-alpha color, and composited into
+ * dst with SOURCE_OVER at device-space offset (offset_x, offset_y) relative
+ * to dst's origin.
+ *
+ * This entry operates surface-to-surface and ignores all cairo context
+ * state: no cairo transform, clip, or operator applies. Both surfaces are
+ * flushed before the pass, and dst behaves as externally modified afterwards
+ * (pending cairo drawing is completed first; subsequent cairo drawing to dst
+ * composites over the shadow).
+ *
+ * Requirements:
+ *  - dst and source are D2D surfaces on the SAME cairo device, and
+ *    dst != source (self-shadowing is not supported); otherwise
+ *    CAIRO_STATUS_SURFACE_TYPE_MISMATCH is returned;
+ *  - that device is D3D11-backed (cairo_d2d_create_device11 /
+ *    cairo_d2d_create_device_from_d3d11device) - D3D10-backed devices return
+ *    CAIRO_STATUS_DEVICE_TYPE_MISMATCH;
+ *  - the OS has D2D1.1 (Windows 8+ / Win7 SP1 with Platform Update);
+ *    otherwise, and on any Direct2D failure, CAIRO_STATUS_DEVICE_ERROR is
+ *    returned. Failures leave both surfaces usable.
+ *
+ * Threading: as with all other entries, the caller serializes this call
+ * with all other cairo calls on the same device (the D3D11 device is
+ * single-threaded).
+ *
+ * \param dst      Destination D2D surface (shadow is composited into it)
+ * \param source   Source D2D surface whose alpha defines the silhouette
+ * \param offset_x Horizontal offset of the shadow in dst, in pixels
+ * \param offset_y Vertical offset of the shadow in dst, in pixels
+ * \param sigma    Gaussian blur standard deviation, in pixels (typ. 4..12)
+ * \param red,green,blue,alpha  Shadow color, straight (non-premultiplied)
+ * \return CAIRO_STATUS_SUCCESS or an error status (see above)
+ */
+cairo_public cairo_status_t
+cairo_d2d_surface_draw_shadow (cairo_surface_t *dst,
+                               cairo_surface_t *source,
+                               double           offset_x,
+                               double           offset_y,
+                               double           sigma,
+                               double           red,
+                               double           green,
+                               double           blue,
+                               double           alpha);
+
+#endif
+
 CAIRO_END_DECLS
 
 #else  /* CAIRO_HAS_WIN32_SURFACE */

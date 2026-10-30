@@ -55,6 +55,8 @@ typedef DWRITE_COLOR_GLYPH_RUN1 DWRITE_COLOR_GLYPH_RUN1_WORKAROUND;
 #include "d2d1-extra.h"
 #endif
 
+#include "d2d/cairo-d2d-private.h"
+
 // DirectWrite is not available on all platforms.
 typedef HRESULT (WINAPI*DWriteCreateFactoryFunc)(
   DWRITE_FACTORY_TYPE factoryType,
@@ -71,6 +73,8 @@ struct _cairo_dwrite_scaled_font {
     IDWriteFontFace *dwriteface; /* Can't use RefPtr because this struct is malloc'd.  */
     IDWriteRenderingParams *rendering_params; /* Can't use RefPtr because this struct is malloc'd.  */
     DWRITE_MEASURING_MODE measuring_mode;
+    cairo_bool_t manual_show_glyphs_allowed;
+    cairo_d2d_surface_t::TextRenderingState rendering_mode;
 };
 typedef struct _cairo_dwrite_scaled_font cairo_dwrite_scaled_font_t;
 
@@ -169,17 +173,72 @@ public:
 	return family;
     }
 
+    static RefPtr<IDWriteRenderingParams> RenderingParams(cairo_d2d_surface_t::TextRenderingState mode)
+    {
+        if (!mDefaultRenderingParams) {
+            CreateRenderingParams();
+        }
+        IDWriteRenderingParams* params;
+        if (mode == cairo_d2d_surface_t::TEXT_RENDERING_NO_CLEARTYPE) {
+            params = mDefaultRenderingParams;
+        }
+        else if (mode == cairo_d2d_surface_t::TEXT_RENDERING_GDI_CLASSIC && mRenderingMode < 0) {
+            params = mForceGDIClassicRenderingParams;
+        }
+        else {
+            params = mCustomClearTypeRenderingParams;
+        }
+        if (params) {
+            params->AddRef();
+        }
+        return params;
+    }
+
     static RefPtr<IDWriteRenderingParams> DefaultRenderingParams()
     {
-	if (!mDefaultRenderingParams) {
-	    if (Instance()) {
-		Instance()->CreateRenderingParams(&mDefaultRenderingParams);
+	    if (!mDefaultRenderingParams) {
+            CreateRenderingParams();
 	    }
-	}
-	return mDefaultRenderingParams;
+	    return mDefaultRenderingParams;
+    }
+
+    static void SetRenderingParams(FLOAT aGamma,
+        FLOAT aEnhancedContrast,
+        FLOAT aClearTypeLevel,
+        int aPixelGeometry,
+        int aRenderingMode)
+    {
+        mGamma = aGamma;
+        mEnhancedContrast = aEnhancedContrast;
+        mClearTypeLevel = aClearTypeLevel;
+        mPixelGeometry = aPixelGeometry;
+        mRenderingMode = aRenderingMode;
+        // discard any current RenderingParams objects
+        mCustomClearTypeRenderingParams = NULL;
+        mForceGDIClassicRenderingParams = NULL;
+        mDefaultRenderingParams = NULL;
+    }
+
+    static int GetClearTypeRenderingMode() {
+        return mRenderingMode;
+    }
+
+    static void reset()
+    {
+        mFactoryInstance = NULL;
+        mFactoryInstance1 = NULL;
+        mFactoryInstance2 = NULL;
+        mFactoryInstance3 = NULL;
+        mFactoryInstance4 = NULL;
+        mSystemCollection = NULL;
+        mDefaultRenderingParams = NULL;
+        mCustomClearTypeRenderingParams = NULL;
+        mForceGDIClassicRenderingParams = NULL;
     }
 
 private:
+    static void CreateRenderingParams();
+
     static RefPtr<IDWriteFactory> mFactoryInstance;
     static RefPtr<IDWriteFactory1> mFactoryInstance1;
     static RefPtr<IDWriteFactory2> mFactoryInstance2;
@@ -187,6 +246,13 @@ private:
     static RefPtr<IDWriteFactory4> mFactoryInstance4;
     static RefPtr<IDWriteFontCollection> mSystemCollection;
     static RefPtr<IDWriteRenderingParams> mDefaultRenderingParams;
+    static RefPtr<IDWriteRenderingParams> mCustomClearTypeRenderingParams;
+    static RefPtr<IDWriteRenderingParams> mForceGDIClassicRenderingParams;
+    static FLOAT mGamma; // [1.0-2.0]
+    static FLOAT mEnhancedContrast; // [0.0-10.0]
+    static FLOAT mClearTypeLevel; // [0.0-1.0]
+    static int mPixelGeometry; // [0-2]
+    static int mRenderingMode; // [0-5]
 };
 
 class AutoDWriteGlyphRun : public DWRITE_GLYPH_RUN
@@ -234,3 +300,13 @@ struct _cairo_dwrite_font_face {
     DWRITE_MEASURING_MODE measuring_mode;
 };
 typedef struct _cairo_dwrite_font_face cairo_dwrite_font_face_t;
+
+DWRITE_MATRIX _cairo_dwrite_matrix_from_matrix(const cairo_matrix_t* matrix);
+
+// This will initialize a DWrite glyph run from cairo glyphs and a scaled_font.
+void
+_cairo_dwrite_glyph_run_from_glyphs(cairo_glyph_t* glyphs,
+    int num_glyphs,
+    cairo_dwrite_scaled_font_t* scaled_font,
+    AutoDWriteGlyphRun* run,
+    cairo_bool_t* transformed);

@@ -147,7 +147,14 @@ public:
 	    if (createD2DFactory) {
 		D2D1_FACTORY_OPTIONS options;
 		options.debugLevel = D2D1_DEBUG_LEVEL_NONE;
-		createD2DFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
+		/* This factory (and the WIC-bitmap render targets built from it in
+		 * _cairo_dwrite_scaled_font_init_glyph_color_surface) is a process-wide
+		 * singleton reached both from text measurement (GUI/layout thread) and
+		 * painting (render thread, once drawing happens off the GUI thread).
+		 * SINGLE_THREADED gives D2D no internal locking, so cross-thread access
+		 * to it is undefined behavior; MULTI_THREADED makes D2D serialize access
+		 * to resources derived from this factory. */
+		createD2DFactory(D2D1_FACTORY_TYPE_MULTI_THREADED,
 				 __uuidof(ID2D1Factory),
 				 &options,
 				 (void**)&mFactoryInstance);
@@ -156,15 +163,15 @@ public:
 	return mFactoryInstance;
     }
 
-    static RefPtr<IDWriteFactory4> Instance4()
-    {
-	if (!mFactoryInstance4) {
-	    if (Instance()) {
-		Instance()->QueryInterface(&mFactoryInstance4);
-	    }
-	}
-	return mFactoryInstance4;
-    }
+ //   static RefPtr<IDWriteFactory4> Instance4()
+ //   {
+	//if (!mFactoryInstance4) {
+	//    if (Instance()) {
+	//	Instance()->QueryInterface(&mFactoryInstance4);
+	//    }
+	//}
+	//return mFactoryInstance4;
+ //   }
 
     static RefPtr<ID2D1DCRenderTarget> RenderTarget()
     {
@@ -189,9 +196,19 @@ public:
 	return mRenderTarget;
     }
 
+    static void reset()
+    {
+        mFactoryInstance = NULL;
+        //if (mFactoryInstance4) {
+        //    mFactoryInstance4->Release();
+        //    mFactoryInstance4 = NULL;
+        //}
+        mRenderTarget = NULL;
+    }
+
 private:
     static RefPtr<ID2D1Factory> mFactoryInstance;
-    static RefPtr<IDWriteFactory4> mFactoryInstance4;
+    //static RefPtr<IDWriteFactory4> mFactoryInstance4;
     static RefPtr<ID2D1DCRenderTarget> mRenderTarget;
 };
 
@@ -201,7 +218,17 @@ public:
     static RefPtr<IWICImagingFactory> Instance()
     {
 	if (!mFactoryInstance) {
-	    CoInitialize(NULL);
+	    /* CoInitialize(NULL) (STA) would bind this process-wide singleton to
+	     * whichever thread first calls Instance() - if that's a worker/render
+	     * thread that later exits before this factory is released (e.g. at
+	     * process shutdown, in *_reset_static_data()), Windows tears down its
+	     * apartment on thread exit and unloads WindowsCodecs.dll out from under
+	     * the still-cached pointer, even though nothing ever explicitly
+	     * released it. CLSID_WICImagingFactory is registered ThreadingModel
+	     * "Both", so creating it while joined to the process MTA instead makes
+	     * it usable from any MTA thread and keeps it alive as long as any
+	     * thread remains joined to the MTA - not tied to this one thread. */
+	    CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	    CoCreateInstance(CLSID_WICImagingFactory,
 			     NULL,
 			     CLSCTX_INPROC_SERVER,
@@ -209,6 +236,12 @@ public:
 	}
 	return mFactoryInstance;
     }
+
+    static void reset()
+    {
+        mFactoryInstance = NULL;
+    }
+
 private:
     static RefPtr<IWICImagingFactory> mFactoryInstance;
 };
@@ -223,9 +256,23 @@ RefPtr<IDWriteFactory4> DWriteFactory::mFactoryInstance4;
 RefPtr<IWICImagingFactory> WICImagingFactory::mFactoryInstance;
 RefPtr<IDWriteFontCollection> DWriteFactory::mSystemCollection;
 RefPtr<IDWriteRenderingParams> DWriteFactory::mDefaultRenderingParams;
+RefPtr<IDWriteRenderingParams> DWriteFactory::mCustomClearTypeRenderingParams;
+RefPtr<IDWriteRenderingParams> DWriteFactory::mForceGDIClassicRenderingParams;
+FLOAT DWriteFactory::mGamma = -1.0f;
+FLOAT DWriteFactory::mEnhancedContrast = -1.0f;
+FLOAT DWriteFactory::mClearTypeLevel = -1.0f;
+int DWriteFactory::mPixelGeometry = -1;
+int DWriteFactory::mRenderingMode = -1;
 
 RefPtr<ID2D1Factory> D2DFactory::mFactoryInstance;
 RefPtr<ID2D1DCRenderTarget> D2DFactory::mRenderTarget;
+
+void
+cairo_dwrite_set_cleartype_params(FLOAT gamma, FLOAT contrast, FLOAT level,
+    int geometry, int mode)
+{
+    DWriteFactory::SetRenderingParams(gamma, contrast, level, geometry, mode);
+}
 
 static RefPtr<IDWriteRenderingParams>
 _create_rendering_params(IDWriteRenderingParams     *params,
@@ -387,7 +434,7 @@ static const cairo_scaled_font_backend_t _cairo_dwrite_scaled_font_backend = {
  * \param Cairo matrix
  * \return DirectWrite matrix
  **/
-static DWRITE_MATRIX
+DWRITE_MATRIX
 _cairo_dwrite_matrix_from_matrix(const cairo_matrix_t *matrix)
 {
     DWRITE_MATRIX dwmat;
@@ -796,7 +843,7 @@ _cairo_dwrite_font_face_scaled_font_create (void			*abstract_face,
     } else {
 	dwrite_font->antialias_mode = options->antialias;
     }
-
+    dwrite_font->manual_show_glyphs_allowed = TRUE;
     dwrite_font->rendering_params = _create_rendering_params(font_face->rendering_params, options, dwrite_font->antialias_mode).forget().drop();
     dwrite_font->measuring_mode = font_face->measuring_mode;
 
@@ -2026,6 +2073,13 @@ cairo_dwrite_font_face_create_for_dwrite_fontface (IDWriteFontFace *dwrite_font_
     return font_face;
 }
 
+void
+cairo_dwrite_scaled_font_allow_manual_show_glyphs(cairo_scaled_font_t* dwrite_scaled_font, cairo_bool_t allowed)
+{
+    cairo_dwrite_scaled_font_t* font = reinterpret_cast<cairo_dwrite_scaled_font_t*>(dwrite_scaled_font);
+    font->manual_show_glyphs_allowed = allowed;
+}
+
 /**
  * cairo_dwrite_font_face_get_rendering_params:
  * @font_face: The #cairo_dwrite_font_face_t object to query
@@ -2112,6 +2166,9 @@ _dwrite_draw_glyphs_to_gdi_surface_gdi(cairo_win32_surface_t *surface,
     RefPtr<IDWriteBitmapRenderTarget> rt;
     HRESULT hr;
 
+    cairo_d2d_surface_t::TextRenderingState renderingState =
+        scaled_font->rendering_mode;
+
     hr = gdiInterop->CreateBitmapRenderTarget(surface->dc,
 					      area.right - area.left,
 					      area.bottom - area.top,
@@ -2125,6 +2182,18 @@ _dwrite_draw_glyphs_to_gdi_surface_gdi(cairo_win32_surface_t *surface,
 	}
     }
 
+    if ((renderingState == cairo_d2d_surface_t::TEXT_RENDERING_NORMAL ||
+        renderingState == cairo_d2d_surface_t::TEXT_RENDERING_GDI_CLASSIC) &&
+        !surface->base.permit_subpixel_antialiasing) {
+        renderingState = cairo_d2d_surface_t::TEXT_RENDERING_NO_CLEARTYPE;
+        IDWriteBitmapRenderTarget1* rt1;
+        hr = rt->QueryInterface(&rt1);
+
+        if (SUCCEEDED(hr) && rt1) {
+            rt1->SetTextAntialiasMode(DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            rt1->Release();
+        }
+    }
     /*
      * We set the number of pixels per DIP to 1.0. This is because we always want
      * to draw in device pixels, and not device independent pixels. On high DPI
@@ -2491,4 +2560,66 @@ _cairo_dwrite_scaled_font_create_win32_scaled_font (cairo_scaled_font_t *scaled_
 
     *new_font = font;
     return CAIRO_INT_STATUS_SUCCESS;
+}
+
+#define ENHANCED_CONTRAST_REGISTRY_KEY \
+    HKEY_CURRENT_USER, "Software\\Microsoft\\Avalon.Graphics\\DISPLAY1\\EnhancedContrastLevel"
+
+void
+DWriteFactory::CreateRenderingParams()
+{
+    RefPtr<IDWriteFactory> inst = Instance();
+    if (!inst) {
+        return;
+    }
+
+    inst->CreateRenderingParams(&mDefaultRenderingParams);
+
+    // For EnhancedContrast, we override the default if the user has not set it
+    // in the registry (by using the ClearType Tuner).
+    FLOAT contrast;
+    if (mEnhancedContrast >= 0.0 && mEnhancedContrast <= 10.0) {
+        contrast = mEnhancedContrast;
+    }
+    else {
+        HKEY hKey;
+        if (RegOpenKeyExA(ENHANCED_CONTRAST_REGISTRY_KEY,
+            0, KEY_READ, &hKey) == ERROR_SUCCESS)
+        {
+            contrast = mDefaultRenderingParams->GetEnhancedContrast();
+            RegCloseKey(hKey);
+        }
+        else {
+            contrast = 1.0;
+        }
+    }
+
+    // For parameters that have not been explicitly set via the SetRenderingParams API,
+    // we copy values from default params (or our overridden value for contrast)
+    FLOAT gamma =
+        mGamma >= 1.0 && mGamma <= 2.2 ?
+        mGamma : mDefaultRenderingParams->GetGamma();
+    FLOAT clearTypeLevel =
+        mClearTypeLevel >= 0.0 && mClearTypeLevel <= 1.0 ?
+        mClearTypeLevel : mDefaultRenderingParams->GetClearTypeLevel();
+    DWRITE_PIXEL_GEOMETRY pixelGeometry =
+        mPixelGeometry >= DWRITE_PIXEL_GEOMETRY_FLAT && mPixelGeometry <= DWRITE_PIXEL_GEOMETRY_BGR ?
+        (DWRITE_PIXEL_GEOMETRY)mPixelGeometry : mDefaultRenderingParams->GetPixelGeometry();
+    DWRITE_RENDERING_MODE renderingMode =
+        mRenderingMode >= DWRITE_RENDERING_MODE_DEFAULT && mRenderingMode <= DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC ?
+        (DWRITE_RENDERING_MODE)mRenderingMode : mDefaultRenderingParams->GetRenderingMode();
+    inst->CreateCustomRenderingParams(gamma, contrast, clearTypeLevel,
+        pixelGeometry, renderingMode,
+        &mCustomClearTypeRenderingParams);
+    inst->CreateCustomRenderingParams(gamma, contrast, clearTypeLevel,
+        pixelGeometry, DWRITE_RENDERING_MODE_CLEARTYPE_GDI_CLASSIC,
+        &mForceGDIClassicRenderingParams);
+}
+
+void
+_cairo_dwrite_font_reset_static_data(void)
+{
+    D2DFactory::reset();
+    DWriteFactory::reset();
+    WICImagingFactory::reset();
 }
