@@ -47,6 +47,9 @@ CAIRO_BEGIN_DECLS
 cairo_public cairo_font_face_t *
 cairo_dwrite_font_face_create_for_dwrite_fontface (IDWriteFontFace *dwrite_font_face);
 
+cairo_public void
+cairo_dwrite_scaled_font_allow_manual_show_glyphs(cairo_scaled_font_t* dwrite_scaled_font, cairo_bool_t allowed);
+
 cairo_public IDWriteRenderingParams *
 cairo_dwrite_font_face_get_rendering_params (cairo_font_face_t *font_face);
 

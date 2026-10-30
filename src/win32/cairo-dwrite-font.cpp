@@ -209,6 +209,22 @@ IDWriteFactory4 *DWriteFactory::mFactoryInstance4;
 IDWriteFactory8 *DWriteFactory::mFactoryInstance8;
 cairo_atomic_once_t DWriteFactory::mOnceSystemCollection = CAIRO_ATOMIC_ONCE_INIT;
 IDWriteFontCollection *DWriteFactory::mSystemCollection;
+SRWLOCK DWriteFactory::mRenderingParamsLock = SRWLOCK_INIT;
+IDWriteRenderingParams *DWriteFactory::mDefaultRenderingParams;
+IDWriteRenderingParams *DWriteFactory::mCustomClearTypeRenderingParams;
+IDWriteRenderingParams *DWriteFactory::mForceGDIClassicRenderingParams;
+FLOAT DWriteFactory::mGamma = -1.0f;
+FLOAT DWriteFactory::mEnhancedContrast = -1.0f;
+FLOAT DWriteFactory::mClearTypeLevel = -1.0f;
+int DWriteFactory::mPixelGeometry = -1;
+int DWriteFactory::mRenderingMode = -1;
+
+void
+cairo_dwrite_set_cleartype_params(FLOAT gamma, FLOAT contrast, FLOAT level,
+    int geometry, int mode)
+{
+    DWriteFactory::SetRenderingParams(gamma, contrast, level, geometry, mode);
+}
 
 static RefPtr<IDWriteRenderingParams>
 _create_rendering_params(IDWriteRenderingParams     *params,
@@ -376,7 +392,7 @@ static const cairo_scaled_font_backend_t _cairo_dwrite_scaled_font_backend = {
  * \param Cairo matrix
  * \return DirectWrite matrix
  **/
-static DWRITE_MATRIX
+DWRITE_MATRIX
 _cairo_dwrite_matrix_from_matrix(const cairo_matrix_t *matrix)
 {
     DWRITE_MATRIX dwmat;
@@ -785,8 +801,8 @@ _cairo_dwrite_font_face_scaled_font_create (void			*abstract_face,
     } else {
 	dwrite_font->antialias_mode = options->antialias;
     }
-
-    dwrite_font->rendering_params = _create_rendering_params(font_face->rendering_params, options, dwrite_font->antialias_mode).forget().drop();
+    dwrite_font->manual_show_glyphs_allowed = TRUE;
+    dwrite_font->rendering_params =_create_rendering_params(font_face->rendering_params, options, dwrite_font->antialias_mode).forget().drop();
     dwrite_font->measuring_mode = font_face->measuring_mode;
 
     return _cairo_scaled_font_set_metrics (*font, &extents);
@@ -2057,6 +2073,13 @@ cairo_dwrite_font_face_create_for_dwrite_fontface (IDWriteFontFace *dwrite_font_
     return font_face;
 }
 
+void
+cairo_dwrite_scaled_font_allow_manual_show_glyphs(cairo_scaled_font_t* dwrite_scaled_font, cairo_bool_t allowed)
+{
+    cairo_dwrite_scaled_font_t* font = reinterpret_cast<cairo_dwrite_scaled_font_t*>(dwrite_scaled_font);
+    font->manual_show_glyphs_allowed = allowed;
+}
+
 /**
  * cairo_dwrite_font_face_get_rendering_params:
  * @font_face: The #cairo_dwrite_font_face_t object to query
@@ -2143,6 +2166,9 @@ _dwrite_draw_glyphs_to_gdi_surface_gdi(cairo_win32_surface_t *surface,
     RefPtr<IDWriteBitmapRenderTarget> rt;
     HRESULT hr;
 
+    cairo_d2d_surface_t::TextRenderingState renderingState =
+        scaled_font->rendering_mode;
+
     hr = gdiInterop->CreateBitmapRenderTarget(surface->dc,
 					      area.right - area.left,
 					      area.bottom - area.top,
@@ -2156,6 +2182,18 @@ _dwrite_draw_glyphs_to_gdi_surface_gdi(cairo_win32_surface_t *surface,
 	}
     }
 
+    if ((renderingState == cairo_d2d_surface_t::TEXT_RENDERING_NORMAL ||
+        renderingState == cairo_d2d_surface_t::TEXT_RENDERING_GDI_CLASSIC) &&
+        !surface->base.permit_subpixel_antialiasing) {
+        renderingState = cairo_d2d_surface_t::TEXT_RENDERING_NO_CLEARTYPE;
+        IDWriteBitmapRenderTarget1* rt1;
+        hr = rt->QueryInterface(&rt1);
+
+        if (SUCCEEDED(hr) && rt1) {
+            rt1->SetTextAntialiasMode(DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            rt1->Release();
+        }
+    }
     /*
      * We set the number of pixels per DIP to 1.0. This is because we always want
      * to draw in device pixels, and not device independent pixels. On high DPI
@@ -2464,4 +2502,72 @@ void
 cairo_win32_dwrite_finalize ()
 {
     DWriteFactory::Finalize();
+}
+
+#define ENHANCED_CONTRAST_REGISTRY_KEY \
+    HKEY_CURRENT_USER, "Software\\Microsoft\\Avalon.Graphics\\DISPLAY1\\EnhancedContrastLevel"
+
+void
+DWriteFactory::CreateRenderingParams()
+{
+    IDWriteFactory *inst = Instance();
+    if (!inst || FAILED(inst->CreateRenderingParams(&mDefaultRenderingParams))) {
+        return;
+    }
+
+    // For EnhancedContrast, we override the default if the user has not set it
+    // in the registry (by using the ClearType Tuner).
+    FLOAT contrast;
+    if (mEnhancedContrast >= 0.0 && mEnhancedContrast <= 10.0) {
+        contrast = mEnhancedContrast;
+    }
+    else {
+        HKEY hKey;
+        if (RegOpenKeyExA(ENHANCED_CONTRAST_REGISTRY_KEY,
+            0, KEY_READ, &hKey) == ERROR_SUCCESS)
+        {
+            contrast = mDefaultRenderingParams->GetEnhancedContrast();
+            RegCloseKey(hKey);
+        }
+        else {
+            contrast = 1.0;
+        }
+    }
+
+    // For parameters that have not been explicitly set via the SetRenderingParams API,
+    // we copy values from default params (or our overridden value for contrast)
+    FLOAT gamma =
+        mGamma >= 1.0 && mGamma <= 2.2 ?
+        mGamma : mDefaultRenderingParams->GetGamma();
+    FLOAT clearTypeLevel =
+        mClearTypeLevel >= 0.0 && mClearTypeLevel <= 1.0 ?
+        mClearTypeLevel : mDefaultRenderingParams->GetClearTypeLevel();
+    DWRITE_PIXEL_GEOMETRY pixelGeometry =
+        mPixelGeometry >= DWRITE_PIXEL_GEOMETRY_FLAT && mPixelGeometry <= DWRITE_PIXEL_GEOMETRY_BGR ?
+        (DWRITE_PIXEL_GEOMETRY)mPixelGeometry : mDefaultRenderingParams->GetPixelGeometry();
+    DWRITE_RENDERING_MODE renderingMode =
+        mRenderingMode >= DWRITE_RENDERING_MODE_DEFAULT && mRenderingMode <= DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC ?
+        (DWRITE_RENDERING_MODE)mRenderingMode : mDefaultRenderingParams->GetRenderingMode();
+    inst->CreateCustomRenderingParams(gamma, contrast, clearTypeLevel,
+        pixelGeometry, renderingMode,
+        &mCustomClearTypeRenderingParams);
+    inst->CreateCustomRenderingParams(gamma, contrast, clearTypeLevel,
+        pixelGeometry, DWRITE_RENDERING_MODE_CLEARTYPE_GDI_CLASSIC,
+        &mForceGDIClassicRenderingParams);
+}
+
+/* cairo_debug_reset_static_data(): the DirectWrite singletons and the Direct2D
+ * factory of this thread (those of other threads go as their threads end);
+ * WIC factories are not kept.
+ */
+void
+_cairo_dwrite_font_reset_static_data(void)
+{
+    cairo_win32_thread_data_t *thread_data = cairo_win32_thread_data_get ();
+    if (thread_data->d2d1_factory) {
+        thread_data->d2d1_factory->Release ();
+        thread_data->d2d1_factory = NULL;
+    }
+
+    DWriteFactory::Reset();
 }

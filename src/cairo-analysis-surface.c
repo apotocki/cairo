@@ -433,11 +433,11 @@ _cairo_analysis_surface_get_extents (void			*abstract_surface,
     return _cairo_surface_get_extents (surface->target, rectangle);
 }
 
-static void
+void
 _rectangle_intersect_clip (cairo_rectangle_int_t *extents, const cairo_clip_t *clip)
 {
     if (clip != NULL)
-	_cairo_rectangle_intersect (extents, _cairo_clip_get_extents (clip));
+		_cairo_rectangle_intersect (extents, _cairo_clip_get_extents (clip));
 }
 
 static void

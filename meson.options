@@ -4,6 +4,8 @@ option('fontconfig', type : 'feature', value : 'auto')
 option('freetype', type : 'feature', value : 'auto')
 
 # Cairo surface backends
+option('d2d', type : 'feature', value : 'disabled',
+       description: 'Direct2D surface backend on Direct3D 10.1 / 11 (src/win32/d2d, needs dwrite)')
 option('png', type : 'feature', value : 'auto') # png and svg surfaces
 option('quartz', type : 'feature', value : 'auto')
 option('tee', type : 'feature', value : 'auto')

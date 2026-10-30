@@ -41,6 +41,7 @@
 #include "cairo-array-private.h"
 #include "cairo-clip-inline.h"
 #include "cairo-clip-private.h"
+#include "cairo-pattern-private.h"
 #include "cairo-damage-private.h"
 #include "cairo-device-private.h"
 #include "cairo-error-private.h"
@@ -113,7 +114,8 @@ const cairo_surface_t name = {					\
     TRUE,				/* is_clear */		\
     FALSE,				/* has_font_options */	\
     FALSE,				/* owns_device */ \
-    FALSE,                              /* is_vector */ \
+    FALSE,              /* is_vector */ \
+    FALSE,				/* permit_subpixel_antialiasing */ \
     { 0, 0, 0, NULL, },			/* user_data */		\
     { 0, 0, 0, NULL, },			/* mime_data */         \
     { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 },   /* device_transform */	\
@@ -427,6 +429,7 @@ _cairo_surface_init (cairo_surface_t			*surface,
     surface->serial = 0;
     surface->damage = NULL;
     surface->owns_device = (device != NULL);
+    surface->permit_subpixel_antialiasing = TRUE;
 
     _cairo_user_data_array_init (&surface->user_data);
     _cairo_user_data_array_init (&surface->mime_data);
@@ -455,12 +458,14 @@ _cairo_surface_copy_similar_properties (cairo_surface_t *surface,
 					cairo_surface_t *other)
 {
     if (other->has_font_options || other->backend != surface->backend) {
-	cairo_font_options_t options;
+	    cairo_font_options_t options;
 
-	cairo_surface_get_font_options (other, &options);
-	_cairo_surface_set_font_options (surface, &options);
-	_cairo_font_options_fini (&options);
+	    cairo_surface_get_font_options (other, &options);
+	    _cairo_surface_set_font_options (surface, &options);
+	    _cairo_font_options_fini (&options);
     }
+
+    surface->permit_subpixel_antialiasing = other->permit_subpixel_antialiasing;
 
     cairo_surface_set_fallback_resolution (surface,
 					   other->x_fallback_resolution,
@@ -2882,6 +2887,55 @@ UNLOCK:
     return status;
 }
 
+/**
+ * cairo_surface_set_subpixel_antialiasing:
+ * @surface: a #cairo_surface_t
+ *
+ * Sets whether the surface permits subpixel antialiasing. By default,
+ * surfaces permit subpixel antialiasing.
+ *
+ * Enabling subpixel antialiasing for CONTENT_COLOR_ALPHA surfaces generally
+ * requires that the pixels in the areas under a subpixel antialiasing
+ * operation already be opaque.
+ *
+ * Since: 1.12
+ **/
+void
+cairo_surface_set_subpixel_antialiasing(cairo_surface_t* surface,
+    cairo_subpixel_antialiasing_t enabled)
+{
+    if (surface->status)
+        return;
+
+    if (surface->finished) {
+        _cairo_surface_set_error(surface, CAIRO_STATUS_SURFACE_FINISHED);
+        return;
+    }
+
+    surface->permit_subpixel_antialiasing =
+        enabled == CAIRO_SUBPIXEL_ANTIALIASING_ENABLED;
+}
+
+/**
+ * cairo_surface_get_subpixel_antialiasing:
+ * @surface: a #cairo_surface_t
+ *
+ * Gets whether the surface supports subpixel antialiasing. By default,
+ * CAIRO_CONTENT_COLOR surfaces support subpixel antialiasing but other
+ * surfaces do not.
+ *
+ * Since: 1.12
+ **/
+cairo_subpixel_antialiasing_t
+cairo_surface_get_subpixel_antialiasing(cairo_surface_t* surface)
+{
+    if (surface->status)
+        return CAIRO_SUBPIXEL_ANTIALIASING_DISABLED;
+
+    return surface->permit_subpixel_antialiasing ?
+        CAIRO_SUBPIXEL_ANTIALIASING_ENABLED : CAIRO_SUBPIXEL_ANTIALIASING_DISABLED;
+}
+
 /* Note: the backends may modify the contents of the glyph array as long as
  * they do not return %CAIRO_INT_STATUS_UNSUPPORTED. This makes it possible to
  * avoid copying the array again and again, and edit it in-place.
@@ -3089,6 +3143,49 @@ _cairo_surface_set_resolution (cairo_surface_t *surface,
 
     surface->x_resolution = x_res;
     surface->y_resolution = y_res;
+}
+
+/* Generic methods for determining operation extents. */
+static void
+_cairo_surface_operation_extents (cairo_surface_t *surface,
+				  cairo_operator_t op,
+				  const cairo_pattern_t *source,
+                  const cairo_clip_t *clip,
+				  cairo_rectangle_int_t *extents)
+{
+    cairo_bool_t is_empty;
+
+    is_empty = _cairo_surface_get_extents (surface, extents);
+
+    if (_cairo_operator_bounded_by_source (op)) {
+	cairo_rectangle_int_t source_extents;
+
+	_cairo_pattern_get_extents (source, &source_extents, surface->is_vector);
+	is_empty = _cairo_rectangle_intersect (extents, &source_extents);
+    }
+
+    _rectangle_intersect_clip (extents, clip);
+}
+cairo_status_t
+_cairo_surface_mask_extents (cairo_surface_t *surface,
+			     cairo_operator_t		 op,
+			     const cairo_pattern_t	*source,
+			     const cairo_pattern_t	*mask,
+			     const cairo_clip_t		*clip,
+			     cairo_rectangle_int_t	*extents)
+{
+    cairo_bool_t is_empty;
+
+    _cairo_surface_operation_extents (surface, op, source, clip, extents);
+
+    if (_cairo_operator_bounded_by_mask (op)) {
+	cairo_rectangle_int_t mask_extents;
+
+	_cairo_pattern_get_extents (mask, &mask_extents, surface->is_vector);
+	is_empty = _cairo_rectangle_intersect (extents, &mask_extents);
+    }
+
+    return CAIRO_STATUS_SUCCESS;
 }
 
 /**

@@ -39,6 +39,8 @@
 #include "dwrite-extra.hpp"
 #include "d2d1-extra.hpp"
 
+#include "d2d/cairo-d2d-private.h"
+
 /* #cairo_scaled_font_t implementation */
 struct _cairo_dwrite_scaled_font {
     cairo_scaled_font_t base;
@@ -48,6 +50,8 @@ struct _cairo_dwrite_scaled_font {
     IDWriteFontFace *dwriteface; /* Can't use RefPtr because this struct is malloc'd.  */
     IDWriteRenderingParams *rendering_params; /* Can't use RefPtr because this struct is malloc'd.  */
     DWRITE_MEASURING_MODE measuring_mode;
+    cairo_bool_t manual_show_glyphs_allowed;
+    cairo_d2d_surface_t::TextRenderingState rendering_mode;
 };
 typedef struct _cairo_dwrite_scaled_font cairo_dwrite_scaled_font_t;
 
@@ -129,10 +133,91 @@ public:
 	return family;
     }
 
+    /* The rendering parameters of the Direct2D surface: the default ones and two
+     * built from them with the values cairo_dwrite_set_cleartype_params() set.
+     * The returned reference is the caller's.
+     */
+    static RefPtr<IDWriteRenderingParams>
+    RenderingParams(cairo_d2d_surface_t::TextRenderingState mode)
+    {
+        RefPtr<IDWriteRenderingParams> params;
+
+        AcquireSRWLockExclusive (&mRenderingParamsLock);
+        if (!mDefaultRenderingParams) {
+            CreateRenderingParams();
+        }
+        if (mode == cairo_d2d_surface_t::TEXT_RENDERING_NO_CLEARTYPE) {
+            params = mDefaultRenderingParams;
+        } else if (mode == cairo_d2d_surface_t::TEXT_RENDERING_GDI_CLASSIC && mRenderingMode < 0) {
+            params = mForceGDIClassicRenderingParams;
+        } else {
+            params = mCustomClearTypeRenderingParams;
+        }
+        ReleaseSRWLockExclusive (&mRenderingParamsLock);
+        return params;
+    }
+
+    static void
+    SetRenderingParams(FLOAT aGamma,
+                       FLOAT aEnhancedContrast,
+                       FLOAT aClearTypeLevel,
+                       int aPixelGeometry,
+                       int aRenderingMode)
+    {
+        AcquireSRWLockExclusive (&mRenderingParamsLock);
+        mGamma = aGamma;
+        mEnhancedContrast = aEnhancedContrast;
+        mClearTypeLevel = aClearTypeLevel;
+        mPixelGeometry = aPixelGeometry;
+        mRenderingMode = aRenderingMode;
+        /* discard the current parameters: the next RenderingParams() makes them anew */
+        ReleaseRenderingParams();
+        ReleaseSRWLockExclusive (&mRenderingParamsLock);
+    }
+
+    static int
+    GetClearTypeRenderingMode()
+    {
+        return mRenderingMode;
+    }
+
+    /* cairo_debug_reset_static_data(): releases the factories, the system
+     * collection and the rendering parameters at once; the next use creates
+     * them anew. Nothing of cairo may be in use.
+     */
+    static void
+    Reset()
+    {
+        static const cairo_atomic_once_t once_init = CAIRO_ATOMIC_ONCE_INIT;
+
+        AcquireSRWLockExclusive (&mRenderingParamsLock);
+        ReleaseRenderingParams();
+        ReleaseSRWLockExclusive (&mRenderingParamsLock);
+
+        if (_cairo_atomic_init_once_check (&mOnceSystemCollection)) {
+            ReleaseInterface (mSystemCollection);
+            mOnceSystemCollection = once_init;
+        }
+
+        if (_cairo_atomic_init_once_check (&mOnceFactories)) {
+            ReleaseInterface (mFactoryInstance);
+            ReleaseInterface (mFactoryInstance1);
+            ReleaseInterface (mFactoryInstance2);
+            ReleaseInterface (mFactoryInstance3);
+            ReleaseInterface (mFactoryInstance4);
+            ReleaseInterface (mFactoryInstance8);
+            mOnceFactories = once_init;
+        }
+    }
+
     static void
     Finalize()
     {
         /* Loader-lock-safe */
+
+        cairo_win32_async_com_release (mDefaultRenderingParams);
+        cairo_win32_async_com_release (mCustomClearTypeRenderingParams);
+        cairo_win32_async_com_release (mForceGDIClassicRenderingParams);
 
         if (_cairo_atomic_init_once_check (&mOnceSystemCollection)) {
             cairo_win32_async_com_release (mSystemCollection);
@@ -194,6 +279,27 @@ private:
         }
     }
 
+    template<typename T>
+    static void
+    ReleaseInterface(T *&iface)
+    {
+        if (iface) {
+            iface->Release();
+            iface = NULL;
+        }
+    }
+
+    /* under mRenderingParamsLock */
+    static void CreateRenderingParams();
+
+    static void
+    ReleaseRenderingParams()
+    {
+        ReleaseInterface (mDefaultRenderingParams);
+        ReleaseInterface (mCustomClearTypeRenderingParams);
+        ReleaseInterface (mForceGDIClassicRenderingParams);
+    }
+
 private:
     static cairo_atomic_once_t mOnceFactories;
     static IDWriteFactory *mFactoryInstance;
@@ -205,6 +311,16 @@ private:
 
     static cairo_atomic_once_t mOnceSystemCollection;
     static IDWriteFontCollection *mSystemCollection;
+
+    static SRWLOCK mRenderingParamsLock;
+    static IDWriteRenderingParams *mDefaultRenderingParams;
+    static IDWriteRenderingParams *mCustomClearTypeRenderingParams;
+    static IDWriteRenderingParams *mForceGDIClassicRenderingParams;
+    static FLOAT mGamma; // [1.0-2.0]
+    static FLOAT mEnhancedContrast; // [0.0-10.0]
+    static FLOAT mClearTypeLevel; // [0.0-1.0]
+    static int mPixelGeometry; // [0-2]
+    static int mRenderingMode; // [0-5]
 };
 
 class AutoDWriteGlyphRun : public DWRITE_GLYPH_RUN
@@ -252,3 +368,13 @@ struct _cairo_dwrite_font_face {
     DWRITE_MEASURING_MODE measuring_mode;
 };
 typedef struct _cairo_dwrite_font_face cairo_dwrite_font_face_t;
+
+DWRITE_MATRIX _cairo_dwrite_matrix_from_matrix(const cairo_matrix_t* matrix);
+
+// This will initialize a DWrite glyph run from cairo glyphs and a scaled_font.
+void
+_cairo_dwrite_glyph_run_from_glyphs(cairo_glyph_t* glyphs,
+    int num_glyphs,
+    cairo_dwrite_scaled_font_t* scaled_font,
+    AutoDWriteGlyphRun* run,
+    cairo_bool_t* transformed);

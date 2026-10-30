@@ -578,6 +578,21 @@ if host_machine.system() == 'windows'
       endforeach
     endif
 
+    # the Direct2D surface (src/win32/d2d): Direct3D 10.1 and 11 are loaded at run time (LoadLibrary), only their
+    # headers are needed
+    d2d_surface_headers = cpp_compiler.has_header('d3d10_1.h') and cpp_compiler.has_header('d3d11.h') and cpp_compiler.has_header('d2d1_1.h')
+    if get_option('d2d').enabled() and not d2d_surface_headers
+      error('d2d: the Direct3D 10.1 / 11 and Direct2D 1.1 headers of the Windows SDK are missing')
+    endif
+    if not get_option('d2d').disabled() and d2d_surface_headers
+      feature_conf.set('CAIRO_HAS_D2D_SURFACE', 1)
+      built_features += [{
+        'name': 'cairo-d2d-surface',
+        'description': 'Microsoft Windows Direct2D surface backend',
+        'deps': [d2d_dep],
+      }]
+    endif
+
     add_project_arguments(sdk_version_args, language: ['c', 'cpp'])
   else
     add_project_arguments('-DWINVER=_WIN32_WINNT_VISTA', '-D_WIN32_WINNT=_WIN32_WINNT_VISTA', language: ['c', 'cpp'])
@@ -892,6 +907,7 @@ summary({
         'Fontconfig': feature_conf.get('CAIRO_HAS_FC_FONT', 0) == 1,
         'Win32': feature_conf.get('CAIRO_HAS_WIN32_FONT', 0) == 1,
         'Win32 DWrite': feature_conf.get('CAIRO_HAS_DWRITE_FONT', 0) == 1,
+        'Win32 D2D': feature_conf.get('CAIRO_HAS_D2D_SURFACE', 0) == 1,
         'Quartz': feature_conf.get('CAIRO_HAS_QUARTZ_FONT', 0) == 1,
         }, section: 'Font Backends', bool_yn: true)
 

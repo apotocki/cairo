@@ -75,8 +75,16 @@ cairo_private cairo_int_status_t
 _cairo_analysis_surface_merge_status (cairo_int_status_t status_a,
 				      cairo_int_status_t status_b);
 
-cairo_private cairo_surface_t *
-_cairo_null_surface_create (cairo_content_t content);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+cairo_private cairo_surface_t*
+_cairo_null_surface_create(cairo_content_t content);
+
+#ifdef __cplusplus
+}
+#endif
 
 static inline cairo_bool_t
 _cairo_surface_is_analysis (const cairo_surface_t *surface)
