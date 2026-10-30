@@ -145,3 +145,12 @@ _cairo_win32_flags_for_dc (HDC dc, cairo_format_t format)
 
     return flags;
 }
+
+void _cairo_win32_device_reset_static_data(void)
+{
+	if (__cairo_win32_device) {
+		cairo_device_t * device = __cairo_win32_device;
+		__cairo_win32_device = NULL;
+		cairo_device_destroy(device);
+	}
+}

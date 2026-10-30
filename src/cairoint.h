@@ -429,6 +429,11 @@ _cairo_ft_font_reset_static_data (void);
 cairo_private void
 _cairo_win32_font_reset_static_data (void);
 
+#if CAIRO_HAS_WIN32_SURFACE
+cairo_private void
+_cairo_win32_device_reset_static_data(void);
+#endif
+
 /* the font backend interface */
 
 struct _cairo_unscaled_font_backend {
