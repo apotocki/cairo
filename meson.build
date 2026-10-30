@@ -655,6 +655,10 @@ if pixman_dep.found()
   if pixman_dep.version().version_compare('>= 0.42.3')
     conf.set('HAS_PIXMAN_r8g8b8_sRGB', 1)
   endif
+  # a pixman with pixman_reset_static_data(), which cairo_debug_reset_static_data() calls (a patched pixman)
+  if pixman_dep.type_name() != 'internal' and cc.has_function('pixman_reset_static_data', prefix: '#include <pixman.h>', dependencies: [pixman_dep])
+    conf.set('HAVE_PIXMAN_RESET_STATIC_DATA', 1)
+  endif
   if pixman_dep.type_name() == 'internal'
     internal_deps += [pixman_dep]
   else

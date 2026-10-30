@@ -74,6 +74,9 @@ cairo_debug_reset_static_data (void)
 
 #if CAIRO_HAS_WIN32_FONT
     _cairo_win32_font_reset_static_data ();
+#endif
+
+#if CAIRO_HAS_DWRITE_FONT
 	_cairo_dwrite_font_reset_static_data();
 #endif
 
@@ -94,6 +97,12 @@ cairo_debug_reset_static_data (void)
     _cairo_image_compositor_reset_static_data ();
 
     _cairo_default_context_reset_static_data ();
+
+#if HAVE_PIXMAN_RESET_STATIC_DATA
+    /* pixman's implementations, which toolchains without destructors (MSVC) never free: a pixman with
+     * pixman_reset_static_data() (a patched pixman, vs-projects/cairo/addon.c) */
+    pixman_reset_static_data ();
+#endif
 
     CAIRO_MUTEX_FINALIZE ();
 }
