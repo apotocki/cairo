@@ -1,5 +1,10 @@
 # Cairo: Multi-platform 2D graphics library
 
+> **This is a fork of Cairo**, the branch `d2d`: Cairo 1.18.6 with a **Direct2D surface** on Direct3D 10.1 and 11
+> (`cairo_d2d_*` in `cairo-win32.h`, the meson option `d2d`), the CSS blend modes and a drop shadow on the GPU, and
+> fixes of Cairo's clean shutdown on Windows and of a leak of WIC factories. The branch `legacy` has the fixes alone.
+> What it adds, how to build it and how to use it: [README.d2d.md](README.d2d.md).
+
 <https://cairographics.org>
 
 What is cairo
