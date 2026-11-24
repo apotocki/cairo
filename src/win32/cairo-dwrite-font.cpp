@@ -187,7 +187,10 @@ public:
          */
         cairo_win32_ensure_mta ();
 
-        IWICImagingFactory *wic_factory;
+        /* CoCreateInstance gives the reference to the RefPtr: one made from
+         * a plain pointer would take another, never released.
+         */
+        RefPtr<IWICImagingFactory> wic_factory;
         hr = CoCreateInstance (CLSID_WICImagingFactory,
                                NULL,
                                CLSCTX_INPROC_SERVER,
