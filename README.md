@@ -1,5 +1,11 @@
 # Cairo: Multi-platform 2D graphics library
 
+> **This is a fork of Cairo**, the branch `legacy`: Cairo 1.18.6 with fixes on Windows and nothing new in its API.
+> `cairo_debug_reset_static_data()` destroys the device of the Win32 surfaces, never freed before
+> ([issue #19](https://gitlab.freedesktop.org/cairo/cairo/-/issues/19)), and pixman's implementations when the pixman
+> found provides `pixman_reset_static_data()`; DirectWrite no longer loses a WIC factory on every glyph surface. The
+> branch `d2d` adds a Direct2D surface on Direct3D 10.1 and 11 (its `README.d2d.md`).
+
 <https://cairographics.org>
 
 What is cairo
