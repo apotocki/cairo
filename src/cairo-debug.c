@@ -94,6 +94,11 @@ cairo_debug_reset_static_data (void)
 
     _cairo_default_context_reset_static_data ();
 
+#if HAVE_PIXMAN_RESET_STATIC_DATA
+    /* pixman's implementations, which toolchains without destructors (MSVC) never free */
+    pixman_reset_static_data ();
+#endif
+
     CAIRO_MUTEX_FINALIZE ();
 }
 
