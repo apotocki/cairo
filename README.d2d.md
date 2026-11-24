@@ -1,6 +1,6 @@
 # Cairo with a Direct2D surface
 
-The `d2d` branch of this repository is Cairo 1.18.4 with:
+The `d2d` branch of this repository is Cairo 1.18.6 with:
 
 - a **Direct2D surface** in `src/win32/d2d/` (`cairo_d2d_*` in `cairo-win32.h`, `CAIRO_HAS_D2D_SURFACE`), derived from
   the D2D backend Mozilla wrote for cairo, on **Direct3D 10.1** and on **Direct3D 11** (`cairo_d2d_create_device11`);
@@ -9,9 +9,13 @@ The `d2d` branch of this repository is Cairo 1.18.4 with:
   compiler is needed to build);
 - a GPU drop shadow (`cairo_d2d_surface_draw_shadow`);
 - clean shutdown in `cairo_debug_reset_static_data()`: the Win32 device ([issue #19](https://gitlab.freedesktop.org/cairo/cairo/-/issues/19)),
-  the DirectWrite, Direct2D and WIC singletons, and pixman's implementations when the pixman found provides
-  `pixman_reset_static_data()`;
+  the DirectWrite singletons and the Direct2D factory of the calling thread, and pixman's implementations when the
+  pixman found provides `pixman_reset_static_data()`;
+- no WIC factory leaked per glyph surface (Cairo 1.18.6 lost one on every call);
 - `CAIRO_STATUS_UNSUPPORTED` (100, outside upstream's sequence).
+
+The `legacy` branch is the same Cairo with only the fixes that are not of Direct2D: the Win32 device, pixman's
+implementations and the WIC factory. The branch d2d on Cairo 1.18.4 is the tag `d2d-1.18.4`.
 
 The Direct3D 11 backend is described in `doc/d2d/d3d11-backend.md`; `test/d2d/` holds two standalone test programs.
 Direct3D is loaded at run time, so the library links no Direct3D import library.
